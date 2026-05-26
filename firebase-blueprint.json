@@ -1,0 +1,131 @@
+{
+  "entities": {
+    "Campaign": {
+      "title": "Campaign",
+      "description": "Traffic simulation campaign configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "targetUrl": { "type": "string" },
+        "totalVolume": { "type": "integer" },
+        "dailyVolume": { "type": "integer" },
+        "durationSeconds": { "type": "integer" },
+        "bounceRateTarget": { "type": "integer" },
+        "intervals": { "type": "string" },
+        "geoTarget": { "type": "string" },
+        "deviceSplit": { "type": "object" },
+        "behaviorSim": { "type": "object" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "hitsGenerated": { "type": "integer" },
+        "gaMeasurementId": { "type": "string" },
+        "gaMeasurementSecret": { "type": "string" },
+        "worldwideGeoEnabled": { "type": "boolean" },
+        "geoContinent": { "type": "string" },
+        "randomizeFrequency": { "type": "string" },
+        "excludedCountries": { "type": "array" }
+      },
+      "required": ["id", "name", "targetUrl", "totalVolume", "dailyVolume", "status", "createdAt"]
+    },
+    "ActiveSimulation": {
+      "title": "ActiveSimulation",
+      "description": "State tracking of a running traffic proxy flow simulation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "campaignId": { "type": "string" },
+        "url": { "type": "string" },
+        "activeUsers": { "type": "integer" },
+        "requestsPerSecond": { "type": "number" },
+        "latencyMs": { "type": "integer" },
+        "errorRate": { "type": "number" },
+        "stepsCompleted": { "type": "array" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "campaignId", "url", "activeUsers", "status"]
+    },
+    "FraudAlert": {
+      "title": "FraudAlert",
+      "description": "System detected telemetry anomalies or trigger violations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "campaignId": { "type": "string" },
+        "campaignName": { "type": "string" },
+        "url": { "type": "string" },
+        "flagReason": { "type": "string" },
+        "riskScore": { "type": "integer" },
+        "timeDetected": { "type": "string", "format": "date-time" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "campaignId", "flagReason", "riskScore", "status"]
+    },
+    "TeamMember": {
+      "title": "TeamMember",
+      "description": "Authorized workspace contributors and roles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string" },
+        "avatar": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "GrowTraffic workspace project integrations and API tokens",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "domain": { "type": "string" },
+        "apiToken": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "domain", "apiToken", "createdAt"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Usage invoicing and proxy credit purchases",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string" },
+        "status": { "type": "string" },
+        "visitsUsed": { "type": "integer" },
+        "creditsPurchased": { "type": "integer" }
+      },
+      "required": ["id", "amount", "date", "status", "visitsUsed", "creditsPurchased"]
+    }
+  },
+  "firestore": {
+    "campaigns": {
+      "schema": "Campaign",
+      "description": "The active simulation campaigns"
+    },
+    "simulations": {
+      "schema": "ActiveSimulation",
+      "description": "The live tracking details of runs"
+    },
+    "fraudAlerts": {
+      "schema": "FraudAlert",
+      "description": "Immersive anomalies and anti-bot trigger logs"
+    },
+    "team": {
+      "schema": "TeamMember",
+      "description": "Team workspace profile access boundaries"
+    },
+    "projects": {
+      "schema": "Project",
+      "description": "Registered projects with individual secure validation API credentials"
+    },
+    "invoices": {
+      "schema": "Invoice",
+      "description": "Historic purchase transactions"
+    }
+  }
+}
