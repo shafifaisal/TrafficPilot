@@ -174,30 +174,51 @@ export default function App() {
 
   // 2. Fetch campaign and statistics lists
   const fetchCampaignsAndStats = async () => {
+    // Sync Campaigns
     try {
       const campRes = await fetch("/api/campaigns");
-      if (campRes.ok) {
+      if (campRes.ok && campRes.headers.get("content-type")?.includes("application/json")) {
         const campData = await campRes.json();
-        setCampaigns(campData.campaigns);
-      }
-
-      const statsRes = await fetch("/api/statistics");
-      if (statsRes.ok) {
-        const statsData = await statsRes.json();
-        setSimulations(statsData.activeSimulations);
-        setTotalActiveUsers(statsData.totalActiveUsers);
-        if (statsData.liveGeoLogs) {
-          setLiveGeoLogs(statsData.liveGeoLogs);
+        if (campData && Array.isArray(campData.campaigns)) {
+          setCampaigns(campData.campaigns);
         }
       }
+    } catch (e) {
+      console.error("Campaign sync error:", e);
+    }
 
-      const fraudRes = await fetch("/api/fraud");
-      if (fraudRes.ok) {
-        const fraudData = await fraudRes.json();
-        setFraudAlerts(fraudData.alerts);
+    // Sync Statistics/Simulations
+    try {
+      const statsRes = await fetch("/api/statistics");
+      if (statsRes.ok && statsRes.headers.get("content-type")?.includes("application/json")) {
+        const statsData = await statsRes.json();
+        if (statsData) {
+          if (Array.isArray(statsData.activeSimulations)) {
+            setSimulations(statsData.activeSimulations);
+          }
+          if (typeof statsData.totalActiveUsers === "number") {
+            setTotalActiveUsers(statsData.totalActiveUsers);
+          }
+          if (Array.isArray(statsData.liveGeoLogs)) {
+            setLiveGeoLogs(statsData.liveGeoLogs);
+          }
+        }
       }
     } catch (e) {
-      console.error("Metric sync error:", e);
+      console.error("Statistics sync error:", e);
+    }
+
+    // Sync Fraud alerts
+    try {
+      const fraudRes = await fetch("/api/fraud");
+      if (fraudRes.ok && fraudRes.headers.get("content-type")?.includes("application/json")) {
+        const fraudData = await fraudRes.json();
+        if (fraudData && Array.isArray(fraudData.alerts)) {
+          setFraudAlerts(fraudData.alerts);
+        }
+      }
+    } catch (e) {
+      console.error("Fraud tag sync error:", e);
     }
   };
 

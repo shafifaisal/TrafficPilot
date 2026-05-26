@@ -278,7 +278,12 @@ app.post("/api/projects", async (req, res) => {
 
 // GET active fraud log
 app.get("/api/fraud", (req, res) => {
-  res.json({ alerts: mockFraudAlerts });
+  try {
+    res.json({ alerts: Array.isArray(mockFraudAlerts) ? mockFraudAlerts : [] });
+  } catch (err: any) {
+    console.error("[GrowTraffic AI] Fail inside /api/fraud route handler:", err);
+    res.status(500).json({ error: err.message, alerts: [] });
+  }
 });
 
 // POST resolve fraud
@@ -303,7 +308,12 @@ app.post("/api/fraud/:id/resolve", async (req, res) => {
 
 // GET campaigns list
 app.get("/api/campaigns", (req, res) => {
-  res.json({ campaigns: mockCampaigns });
+  try {
+    res.json({ campaigns: Array.isArray(mockCampaigns) ? mockCampaigns : [] });
+  } catch (err: any) {
+    console.error("[GrowTraffic AI] Fail inside /api/campaigns route handler:", err);
+    res.status(500).json({ error: err.message, campaigns: [] });
+  }
 });
 
 // POST create campaign
@@ -403,28 +413,55 @@ app.delete("/api/campaigns/:id", async (req, res) => {
 
 // GET Live Active Sim statistics (ticks up incrementally to feel fully active!)
 app.get("/api/statistics", (req, res) => {
-  // Simulating metric ticks
-  mockSimulations.forEach(sim => {
-    if (sim.status === "running") {
-      // Fluctuations
-      sim.activeUsers = Math.max(5, sim.activeUsers + (Math.random() > 0.5 ? 1 : -1));
-      sim.requestsPerSecond = parseFloat(Math.max(1, sim.requestsPerSecond + (Math.random() > 0.52 ? 0.3 : -0.2)).toFixed(2));
-      sim.latencyMs = Math.max(80, Math.min(600, sim.latencyMs + Math.floor(Math.random() * 21 - 10)));
-    }
-  });
+  try {
+    const list = Array.isArray(mockSimulations) ? mockSimulations : [];
+    list.forEach(sim => {
+      if (!sim) return;
+      
+      // Fallbacks for any missing structural attributes
+      const activeUsers = typeof sim.activeUsers === "number" && !isNaN(sim.activeUsers) ? sim.activeUsers : 15;
+      const requestsPerSecond = typeof sim.requestsPerSecond === "number" && !isNaN(sim.requestsPerSecond) ? sim.requestsPerSecond : 1.5;
+      const latencyMs = typeof sim.latencyMs === "number" && !isNaN(sim.latencyMs) ? sim.latencyMs : 150;
+      const status = sim.status || "idle";
 
-  const totalActiveUsers = mockSimulations
-    .filter(s => s.status === "running")
-    .reduce((sum, s) => sum + s.activeUsers, 0);
+      if (status === "running") {
+        // Fluctuations
+        sim.activeUsers = Math.max(5, activeUsers + (Math.random() > 0.5 ? 1 : -1));
+        
+        const nextRps = Math.max(1, requestsPerSecond + (Math.random() > 0.52 ? 0.3 : -0.2));
+        sim.requestsPerSecond = parseFloat(nextRps.toFixed(2));
+        
+        sim.latencyMs = Math.max(80, Math.min(600, latencyMs + Math.floor(Math.random() * 21 - 10)));
+      } else {
+        sim.activeUsers = activeUsers;
+        sim.requestsPerSecond = requestsPerSecond;
+        sim.latencyMs = latencyMs;
+      }
+    });
 
-  res.json({
-    activeSimulations: mockSimulations,
-    totalActiveUsers: totalActiveUsers || 190,
-    clientIP: req.ip || "127.0.0.1",
-    serverLoad: "12.4%",
-    concurrencyRate: "99.85%",
-    liveGeoLogs: liveGeoLogs
-  });
+    const activeList = list.filter(s => s && s.status === "running");
+    const totalActiveUsers = activeList.reduce((sum, s) => sum + (s.activeUsers || 0), 0);
+
+    res.json({
+      activeSimulations: list,
+      totalActiveUsers: totalActiveUsers || 190,
+      clientIP: req.ip || "127.0.0.1",
+      serverLoad: "12.4%",
+      concurrencyRate: "99.85%",
+      liveGeoLogs: Array.isArray(liveGeoLogs) ? liveGeoLogs : []
+    });
+  } catch (err: any) {
+    console.error("[GrowTraffic AI] Fail inside /api/statistics route handler:", err);
+    res.status(500).json({
+      error: err.message,
+      activeSimulations: Array.isArray(mockSimulations) ? mockSimulations : [],
+      totalActiveUsers: 190,
+      clientIP: req.ip || "127.0.0.1",
+      serverLoad: "0.0%",
+      concurrencyRate: "100.0%",
+      liveGeoLogs: Array.isArray(liveGeoLogs) ? liveGeoLogs : []
+    });
+  }
 });
 
 // POST stress testing triggers
