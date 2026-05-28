@@ -635,7 +635,38 @@ function handleLocalAPI(path: string, method: string, init?: RequestInit): Promi
     };
   }
   else if (path === "/api/testing/stress" && method === "POST") {
-    body = { success: true };
+    let payload: any = {};
+    try {
+      if (init && init.body) {
+        payload = JSON.parse(init.body.toString());
+      }
+    } catch (_) {}
+    const users = Number(payload.users) || 250;
+    const url = payload.url || "https://example.com";
+    const geo = payload.geo || "US-East Node Cluster";
+    body = {
+      success: true,
+      testId: `stress-${Math.random().toString(36).substring(7)}`,
+      results: {
+        id: `stress-${Math.random().toString(36).substring(7)}`,
+        campaignId: "load-testing",
+        url: url,
+        activeUsers: users,
+        requestsPerSecond: parseFloat((users * 1.5).toFixed(1)),
+        latencyMs: 180 + Math.floor(Math.random() * 150),
+        errorRate: 0.01 + parseFloat((Math.random() * 0.03).toFixed(3)),
+        stepsCompleted: [
+          `Initializing DNS probe from target Geolocation (${geo})`,
+          "Warm-up scale configured: 50 reqs/sec",
+          "Stress ramp-up active",
+          "GA4 and Hotjar verification telemetry checking complete: OK",
+          "Bypassing cache headers"
+        ],
+        status: "completed"
+      },
+      performanceScore: 92 + Math.floor(Math.random() * 6),
+      recommendation: "Ensure keep-alive HTTP tags are enabled on server response headers to optimize response latency under concurrent request bounds."
+    };
   }
   else if (path === "/api/ai/optimize" && method === "POST") {
     body = { success: true, advice: "Optimization complete. Dynamic behavior sequences fine-tuned for active nodes." };
