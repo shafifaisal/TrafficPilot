@@ -705,7 +705,7 @@ export default function App() {
         </div>
 
         {/* ---------- SYSTEMS & PERSISTENCE SYNC CENTER CARD ---------- */}
-        <div id="systems-sync-banner" className="p-5 rounded-2xl bg-zinc-950/30 border border-white/10 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-5 shadow-2xl relative overflow-hidden backdrop-blur-md">
+        <div id="systems-sync-banner" className="hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none"></div>
           
           <div className="flex gap-4 items-start">
