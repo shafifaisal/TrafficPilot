@@ -50,28 +50,422 @@ try {
   dbErrorLine = err.message;
 }
 
-// Relational Write-Through adapters to sync memory with Cloud Storage
-async function saveToFirestore(collectionName: string, docId: string, data: any) {
-  if (!isFirestoreActive || !db) return;
+import pg from "pg";
+
+// ---------- POSTGRES / SUPABASE DATA LAYER ----------
+let isPgActive = false;
+let pgPool: pg.Pool | null = null;
+
+const PG_CON_STRING = process.env.POSTGRES_URL || "postgres://postgres.nsexouppruighjqdsure:XMzoXHiwTcZvlTBi@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&supa=base-pooler.x";
+
+try {
+  // Remove sslmode=require from the connection string to prevent pg-connection-string
+  // from overriding our explicit ssl configuration with a simple boolean.
+  let cleanUri = PG_CON_STRING;
+  if (cleanUri.includes("sslmode=")) {
+    cleanUri = cleanUri
+      .replace(/sslmode=[^&?]+/g, "")
+      .replace(/\?&/g, "?")
+      .replace(/&&/g, "&")
+      .replace(/\?$/, "")
+      .replace(/&$/, "");
+  }
+
+  pgPool = new pg.Pool({
+    connectionString: cleanUri,
+    ssl: { rejectUnauthorized: false }
+  });
+} catch (err: any) {
+  console.error("[GrowTraffic AI Supabase] Failed to initialize pg Pool instance:", err.message);
+}
+
+function mapCampaignFromDb(row: any): Campaign {
+  return {
+    id: row.id,
+    name: row.name,
+    targetUrl: row.target_url || row.targeturl,
+    totalVolume: Number(row.total_volume || row.totalvolume || 0),
+    dailyVolume: Number(row.daily_volume || row.dailyvolume || 0),
+    durationSeconds: Number(row.duration_seconds || row.durationseconds || 0),
+    bounceRateTarget: Number(row.bounce_rate_target || row.bounceratetarget || 0),
+    intervals: row.intervals,
+    geoTarget: row.geo_target || row.geotarget,
+    deviceSplit: typeof row.device_split === 'string' ? JSON.parse(row.device_split) : (row.device_split || row.devicesplit || { desktop: 50, mobile: 50, tablet: 0 }),
+    behaviorSim: typeof row.behavior_sim === 'string' ? JSON.parse(row.behavior_sim) : (row.behavior_sim || row.behaviorsim || { scroll: true, clicks: true, formInput: false }),
+    status: row.status,
+    createdAt: row.created_at || row.createdat,
+    hitsGenerated: Number(row.hits_generated || row.hitsgenerated || 0),
+    gaMeasurementId: row.ga_measurement_id || row.gameasurementid || "",
+    gaMeasurementSecret: row.ga_measurement_secret || row.gameasurementsecret || "",
+    worldwideGeoEnabled: row.worldwide_geo_enabled !== undefined ? row.worldwide_geo_enabled : (row.worldwidegeoenabled || false),
+    geoContinent: row.geo_continent || row.geocontinent || "",
+    randomizeFrequency: row.randomize_frequency || row.randomizefrequency || "session",
+    excludedCountries: Array.isArray(row.excluded_countries) ? row.excluded_countries : 
+                       (Array.isArray(row.excludedcountries) ? row.excludedcountries : [])
+  };
+}
+
+async function saveCampaignToPostgres(camp: Campaign) {
+  if (!isPgActive || !pgPool) return;
   try {
-    // Sanitize any undefined properties for Firestore compliance
-    const cleanData = JSON.parse(JSON.stringify(data));
-    await setDoc(doc(db, collectionName, docId), cleanData);
-    console.log(`[GrowTraffic AI Cloud Sync] Saved matching schema instance to Firestore: ${collectionName}/${docId}`);
+    const client = await pgPool.connect();
+    const query = `
+      INSERT INTO campaigns (
+        id, name, target_url, total_volume, daily_volume, duration_seconds, bounce_rate_target,
+        intervals, geo_target, device_split, behavior_sim, status, created_at, hits_generated,
+        ga_measurement_id, ga_measurement_secret, worldwide_geo_enabled, geo_continent,
+        randomize_frequency, excluded_countries
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        target_url = EXCLUDED.target_url,
+        total_volume = EXCLUDED.total_volume,
+        daily_volume = EXCLUDED.daily_volume,
+        duration_seconds = EXCLUDED.duration_seconds,
+        bounce_rate_target = EXCLUDED.bounce_rate_target,
+        intervals = EXCLUDED.intervals,
+        geo_target = EXCLUDED.geo_target,
+        device_split = EXCLUDED.device_split,
+        behavior_sim = EXCLUDED.behavior_sim,
+        status = EXCLUDED.status,
+        hits_generated = EXCLUDED.hits_generated,
+        ga_measurement_id = EXCLUDED.ga_measurement_id,
+        ga_measurement_secret = EXCLUDED.ga_measurement_secret,
+        worldwide_geo_enabled = EXCLUDED.worldwide_geo_enabled,
+        geo_continent = EXCLUDED.geo_continent,
+        randomize_frequency = EXCLUDED.randomize_frequency,
+        excluded_countries = EXCLUDED.excluded_countries
+    `;
+    await client.query(query, [
+      camp.id,
+      camp.name,
+      camp.targetUrl,
+      camp.totalVolume,
+      camp.dailyVolume,
+      camp.durationSeconds,
+      camp.bounceRateTarget,
+      camp.intervals,
+      camp.geoTarget,
+      JSON.stringify(camp.deviceSplit),
+      JSON.stringify(camp.behaviorSim),
+      camp.status,
+      camp.createdAt,
+      camp.hitsGenerated || 0,
+      camp.gaMeasurementId || null,
+      camp.gaMeasurementSecret || null,
+      camp.worldwideGeoEnabled || false,
+      camp.geoContinent || null,
+      camp.randomizeFrequency || null,
+      camp.excludedCountries || []
+    ]);
+    client.release();
   } catch (err: any) {
-    console.error(`[GrowTraffic AI Cloud Sync] Firestore Write Error on ${collectionName}/${docId}:`, err.message);
-    dbErrorLine = err.message;
+    console.error(`[GrowTraffic AI Supabase] Campaign Save Error on ID "${camp.id}":`, err.message);
   }
 }
 
-async function removeFromFirestore(collectionName: string, docId: string) {
-  if (!isFirestoreActive || !db) return;
+async function removeCampaignFromPostgres(id: string) {
+  if (!isPgActive || !pgPool) return;
   try {
-    await deleteDoc(doc(db, collectionName, docId));
-    console.log(`[GrowTraffic AI Cloud Sync] Dropped index link from Firestore: ${collectionName}/${docId}`);
+    const client = await pgPool.connect();
+    await client.query("DELETE FROM campaigns WHERE id = $1", [id]);
+    client.release();
   } catch (err: any) {
-    console.error(`[GrowTraffic AI Cloud Sync] Firestore Delete Error on ${collectionName}/${docId}:`, err.message);
-    dbErrorLine = err.message;
+    console.error(`[GrowTraffic AI Supabase] Campaign Delete Error on ID "${id}":`, err.message);
+  }
+}
+
+async function saveSimulationToPostgres(sim: ActiveSimulation) {
+  if (!isPgActive || !pgPool) return;
+  try {
+    const client = await pgPool.connect();
+    const query = `
+      INSERT INTO simulations (id, campaign_id, url, active_users, requests_per_second, latency_ms, error_rate, steps_completed, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (id) DO UPDATE SET
+        url = EXCLUDED.url,
+        active_users = EXCLUDED.active_users,
+        requests_per_second = EXCLUDED.requests_per_second,
+        latency_ms = EXCLUDED.latency_ms,
+        error_rate = EXCLUDED.error_rate,
+        steps_completed = EXCLUDED.steps_completed,
+        status = EXCLUDED.status
+    `;
+    await client.query(query, [
+      sim.id,
+      sim.campaignId,
+      sim.url,
+      sim.activeUsers,
+      sim.requestsPerSecond,
+      sim.latencyMs,
+      sim.errorRate,
+      sim.stepsCompleted,
+      sim.status
+    ]);
+    client.release();
+  } catch (err: any) {
+    console.error(`[GrowTraffic AI Supabase] Simulation Save Error on ID "${sim.id}":`, err.message);
+  }
+}
+
+async function removeSimulationFromPostgres(id: string) {
+  if (!isPgActive || !pgPool) return;
+  try {
+    const client = await pgPool.connect();
+    await client.query("DELETE FROM simulations WHERE id = $1", [id]);
+    client.release();
+  } catch (err: any) {
+    console.error(`[GrowTraffic AI Supabase] Simulation Delete Error on ID "${id}":`, err.message);
+  }
+}
+
+async function saveFraudAlertToPostgres(f: FraudAlert) {
+  if (!isPgActive || !pgPool) return;
+  try {
+    const client = await pgPool.connect();
+    const query = `
+      INSERT INTO fraud_alerts (id, campaign_id, campaign_name, url, flag_reason, risk_score, time_detected, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status
+    `;
+    await client.query(query, [
+      f.id,
+      f.campaignId,
+      f.campaignName,
+      f.url,
+      f.flagReason,
+      f.riskScore,
+      f.timeDetected,
+      f.status
+    ]);
+    client.release();
+  } catch (err: any) {
+    console.error(`[GrowTraffic AI Supabase] FraudAlert Save Error on ID "${f.id}":`, err.message);
+  }
+}
+
+async function saveProjectToPostgres(p: Project) {
+  if (!isPgActive || !pgPool) return;
+  try {
+    const client = await pgPool.connect();
+    const query = `
+      INSERT INTO projects (id, name, domain, api_token, created_at)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        domain = EXCLUDED.domain,
+        api_token = EXCLUDED.api_token
+    `;
+    await client.query(query, [p.id, p.name, p.domain, p.apiToken, p.createdAt]);
+    client.release();
+  } catch (err: any) {
+    console.error(`[GrowTraffic AI Supabase] Project Save Error on ID "${p.id}":`, err.message);
+  }
+}
+
+async function saveTeamMemberToPostgres(tm: TeamMember) {
+  if (!isPgActive || !pgPool) return;
+  try {
+    const client = await pgPool.connect();
+    const query = `
+      INSERT INTO team_members (id, name, email, role, avatar)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        email = EXCLUDED.email,
+        role = EXCLUDED.role,
+        avatar = EXCLUDED.avatar
+    `;
+    await client.query(query, [tm.id, tm.name, tm.email, tm.role, tm.avatar || null]);
+    client.release();
+  } catch (err: any) {
+    console.error(`[GrowTraffic AI Supabase] TeamMember Save Error on ID "${tm.id}":`, err.message);
+  }
+}
+
+async function saveInvoiceToPostgres(inv: Invoice) {
+  if (!isPgActive || !pgPool) return;
+  try {
+    const client = await pgPool.connect();
+    const query = `
+      INSERT INTO invoices (id, amount, date, status, visits_used, credits_purchased)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (id) DO UPDATE SET
+        amount = EXCLUDED.amount,
+        status = EXCLUDED.status
+    `;
+    await client.query(query, [inv.id, inv.amount, inv.date, inv.status, inv.visitsUsed, inv.creditsPurchased]);
+    client.release();
+  } catch (err: any) {
+    console.error(`[GrowTraffic AI Supabase] Invoice Save Error on ID "${inv.id}":`, err.message);
+  }
+}
+
+async function initPgDatabase() {
+  if (!pgPool) return;
+  try {
+    console.log("[GrowTraffic AI Supabase] Connecting to Postgres pooler...");
+    const client = await pgPool.connect();
+    console.log("[GrowTraffic AI Supabase] Connected successfully! Bootstrapping table schemas if missing...");
+    
+    // CREATE campaigns
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS campaigns (
+        id VARCHAR(255) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        target_url TEXT NOT NULL,
+        total_volume INTEGER NOT NULL,
+        daily_volume INTEGER NOT NULL,
+        duration_seconds INTEGER NOT NULL,
+        bounce_rate_target INTEGER NOT NULL,
+        intervals VARCHAR(50) NOT NULL,
+        geo_target VARCHAR(100) NOT NULL,
+        device_split JSONB NOT NULL,
+        behavior_sim JSONB NOT NULL,
+        status VARCHAR(50) NOT NULL,
+        created_at VARCHAR(100) NOT NULL,
+        hits_generated INTEGER DEFAULT 0,
+        ga_measurement_id VARCHAR(100),
+        ga_measurement_secret VARCHAR(255),
+        worldwide_geo_enabled BOOLEAN DEFAULT FALSE,
+        geo_continent VARCHAR(100),
+        randomize_frequency VARCHAR(50),
+        excluded_countries TEXT[]
+      )
+    `);
+
+    // CREATE simulations
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS simulations (
+        id VARCHAR(255) PRIMARY KEY,
+        campaign_id VARCHAR(255) NOT NULL,
+        url TEXT NOT NULL,
+        active_users INTEGER NOT NULL,
+        requests_per_second NUMERIC(10,2) NOT NULL,
+        latency_ms INTEGER NOT NULL,
+        error_rate NUMERIC(5,4) NOT NULL,
+        steps_completed TEXT[] NOT NULL,
+        status VARCHAR(50) NOT NULL
+      )
+    `);
+
+    // CREATE fraud_alerts
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS fraud_alerts (
+        id VARCHAR(255) PRIMARY KEY,
+        campaign_id VARCHAR(255) NOT NULL,
+        campaign_name VARCHAR(255) NOT NULL,
+        url TEXT NOT NULL,
+        flag_reason TEXT NOT NULL,
+        risk_score INTEGER NOT NULL,
+        time_detected VARCHAR(100) NOT NULL,
+        status VARCHAR(50) NOT NULL
+      )
+    `);
+
+    // CREATE projects
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id VARCHAR(255) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        domain VARCHAR(255) NOT NULL,
+        api_token VARCHAR(255) NOT NULL,
+        created_at VARCHAR(100) NOT NULL
+      )
+    `);
+
+    // CREATE team_members
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS team_members (
+        id VARCHAR(255) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL,
+        avatar TEXT
+      )
+    `);
+
+    // CREATE invoices
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS invoices (
+        id VARCHAR(255) PRIMARY KEY,
+        amount NUMERIC(10,2) NOT NULL,
+        date VARCHAR(50) NOT NULL,
+        status VARCHAR(50) NOT NULL,
+        visits_used INTEGER NOT NULL,
+        credits_purchased INTEGER NOT NULL
+      )
+    `);
+
+    client.release();
+    isPgActive = true;
+    dbProvider = "Supabase PostgreSQL Database";
+    console.log("[GrowTraffic AI Supabase] PostgreSQL tables verified! Ready to process real-time events.");
+  } catch (err: any) {
+    console.error("[GrowTraffic AI Supabase] PostgreSQL connection/bootstrap error:", err.message);
+    isPgActive = false;
+  }
+}
+
+async function writeToCloudDb(collectionName: string, docId: string, data: any) {
+  // 1. Write to Postgres if active
+  if (isPgActive) {
+    try {
+      if (collectionName === "campaigns") {
+        await saveCampaignToPostgres(data as Campaign);
+      } else if (collectionName === "simulations") {
+        await saveSimulationToPostgres(data as ActiveSimulation);
+      } else if (collectionName === "fraudAlerts") {
+        await saveFraudAlertToPostgres(data as FraudAlert);
+      } else if (collectionName === "projects") {
+        await saveProjectToPostgres(data as Project);
+      } else if (collectionName === "teamMembers") {
+        await saveTeamMemberToPostgres(data as TeamMember);
+      } else if (collectionName === "invoices") {
+        await saveInvoiceToPostgres(data as Invoice);
+      }
+    } catch (e: any) {
+      console.error(`[GrowTraffic AI Supabase Sync] Direct SQL Save Error on "${collectionName}/${docId}":`, e.message);
+    }
+  }
+
+  // 2. Write to Firestore if active
+  if (isFirestoreActive && db) {
+    try {
+      const cleanData = JSON.parse(JSON.stringify(data));
+      await setDoc(doc(db, collectionName, docId), cleanData);
+      console.log(`[GrowTraffic AI Cloud Sync] Saved matching schema instance to Firestore: ${collectionName}/${docId}`);
+    } catch (err: any) {
+      console.error(`[GrowTraffic AI Cloud Sync] Firestore Write Error on ${collectionName}/${docId}:`, err.message);
+      dbErrorLine = err.message;
+    }
+  }
+}
+
+async function removeFromCloudDb(collectionName: string, docId: string) {
+  // 1. Remove from Postgres if active
+  if (isPgActive) {
+    try {
+      if (collectionName === "campaigns") {
+        await removeCampaignFromPostgres(docId);
+      } else if (collectionName === "simulations") {
+        await removeSimulationFromPostgres(docId);
+      }
+    } catch (e: any) {
+      console.error(`[GrowTraffic AI Supabase Sync] Direct SQL Delete Error on "${collectionName}/${docId}":`, e.message);
+    }
+  }
+
+  // 2. Remove from Firestore if active
+  if (isFirestoreActive && db) {
+    try {
+      await deleteDoc(doc(db, collectionName, docId));
+      console.log(`[GrowTraffic AI Cloud Sync] Dropped index link from Firestore: ${collectionName}/${docId}`);
+    } catch (err: any) {
+      console.error(`[GrowTraffic AI Cloud Sync] Firestore Delete Error on ${collectionName}/${docId}:`, err.message);
+      dbErrorLine = err.message;
+    }
   }
 }
 
@@ -272,7 +666,7 @@ app.post("/api/projects", async (req, res) => {
     createdAt: new Date().toISOString()
   };
   mockProjects.push(newProject);
-  await saveToFirestore("projects", newProject.id, newProject);
+  await writeToCloudDb("projects", newProject.id, newProject);
   res.status(201).json(newProject);
 });
 
@@ -293,13 +687,13 @@ app.post("/api/fraud/:id/resolve", async (req, res) => {
   const alert = mockFraudAlerts.find(f => f.id === id);
   if (alert) {
     alert.status = action === "clear" ? "cleared" : "blocked";
-    await saveToFirestore("fraudAlerts", alert.id, alert);
+    await writeToCloudDb("fraudAlerts", alert.id, alert);
     // Pause associated campaign if blocked
     if (action === "block") {
       const camp = mockCampaigns.find(c => c.id === alert.campaignId);
       if (camp) {
         camp.status = "paused";
-        await saveToFirestore("campaigns", camp.id, camp);
+        await writeToCloudDb("campaigns", camp.id, camp);
       }
     }
   }
@@ -367,8 +761,8 @@ app.post("/api/campaigns", async (req, res) => {
   mockSimulations.unshift(newSim);
 
   // Write through to Cloud DB in background
-  await saveToFirestore("campaigns", newCamp.id, newCamp);
-  await saveToFirestore("simulations", newSim.id, newSim);
+  await writeToCloudDb("campaigns", newCamp.id, newCamp);
+  await writeToCloudDb("simulations", newSim.id, newSim);
 
   res.status(201).json({ success: true, campaign: newCamp, simulation: newSim, remainingCredits: globalCredits });
 });
@@ -387,9 +781,9 @@ app.post("/api/campaigns/:id/status", async (req, res) => {
   const sim = mockSimulations.find(s => s.campaignId === id);
   if (sim) {
     sim.status = status === "active" ? "running" : "idle";
-    await saveToFirestore("simulations", sim.id, sim);
+    await writeToCloudDb("simulations", sim.id, sim);
   }
-  await saveToFirestore("campaigns", camp.id, camp);
+  await writeToCloudDb("campaigns", camp.id, camp);
   res.json({ success: true, campaign: camp });
 });
 
@@ -403,9 +797,9 @@ app.delete("/api/campaigns/:id", async (req, res) => {
   mockCampaigns = mockCampaigns.filter(c => c.id !== id);
   mockSimulations = mockSimulations.filter(s => s.campaignId !== id);
   
-  await removeFromFirestore("campaigns", id);
+  await removeFromCloudDb("campaigns", id);
   if (matchingSim) {
-    await removeFromFirestore("simulations", matchingSim.id);
+    await removeFromCloudDb("simulations", matchingSim.id);
   }
   
   res.json({ success: true, id });
@@ -1081,6 +1475,124 @@ setInterval(async () => {
 
 // ------------------------ CLOUD FIRESTORE STARTUP SYNCER ------------------------
 
+async function syncFromPostgres() {
+  if (!isPgActive || !pgPool) return;
+  try {
+    console.log("[GrowTraffic AI Supabase] Synchronizing database state to local cache runtime...");
+    const client = await pgPool.connect();
+
+    // 1. Sync Campaigns
+    const campsRes = await client.query("SELECT * FROM campaigns ORDER BY created_at DESC");
+    if (campsRes.rows.length > 0) {
+      mockCampaigns = campsRes.rows.map(row => mapCampaignFromDb(row));
+      console.log(`[GrowTraffic AI Supabase Sync] Seeding Campaigns from Supabase DB: found ${mockCampaigns.length} entries.`);
+    } else {
+      console.log("[GrowTraffic AI Supabase Sync] No campaigns in Supabase DB. Seeding default set...");
+      for (const camp of mockCampaigns) {
+        await saveCampaignToPostgres(camp);
+      }
+    }
+
+    // 2. Sync Simulations
+    const simsRes = await client.query("SELECT * FROM simulations");
+    if (simsRes.rows.length > 0) {
+      mockSimulations = simsRes.rows.map(row => ({
+        id: row.id,
+        campaignId: row.campaign_id,
+        url: row.url,
+        activeUsers: Number(row.active_users),
+        requestsPerSecond: Number(row.requests_per_second),
+        latencyMs: Number(row.latency_ms),
+        errorRate: Number(row.error_rate),
+        stepsCompleted: row.steps_completed || [],
+        status: row.status
+      }));
+      console.log(`[GrowTraffic AI Supabase Sync] Seeding Simulations from Supabase: found ${mockSimulations.length} entries.`);
+    } else {
+      for (const sim of mockSimulations) {
+        await saveSimulationToPostgres(sim);
+      }
+    }
+
+    // 3. Sync Fraud Alerts
+    const fraudRes = await client.query("SELECT * FROM fraud_alerts");
+    if (fraudRes.rows.length > 0) {
+      mockFraudAlerts = fraudRes.rows.map(row => ({
+        id: row.id,
+        campaignId: row.campaign_id,
+        campaignName: row.campaign_name,
+        url: row.url,
+        flagReason: row.flag_reason,
+        riskScore: Number(row.risk_score),
+        timeDetected: row.time_detected,
+        status: row.status
+      }));
+      console.log(`[GrowTraffic AI Supabase Sync] Seeding Fraud Alerts from Supabase: found ${mockFraudAlerts.length} entries.`);
+    } else {
+      for (const frd of mockFraudAlerts) {
+        await saveFraudAlertToPostgres(frd);
+      }
+    }
+
+    // 4. Sync Projects
+    const projectsRes = await client.query("SELECT * FROM projects");
+    if (projectsRes.rows.length > 0) {
+      mockProjects = projectsRes.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        domain: row.domain,
+        apiToken: row.api_token,
+        createdAt: row.created_at
+      }));
+      console.log(`[GrowTraffic AI Supabase Sync] Seeding Projects from Supabase: found ${mockProjects.length} entries.`);
+    } else {
+      for (const prj of mockProjects) {
+        await saveProjectToPostgres(prj);
+      }
+    }
+
+    // 5. Sync Team Members
+    const teamRes = await client.query("SELECT * FROM team_members");
+    if (teamRes.rows.length > 0) {
+      mockTeamMembers = teamRes.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        avatar: row.avatar
+      }));
+      console.log(`[GrowTraffic AI Supabase Sync] Seeding Team Members from Supabase: found ${mockTeamMembers.length} entries.`);
+    } else {
+      for (const tm of mockTeamMembers) {
+        await saveTeamMemberToPostgres(tm);
+      }
+    }
+
+    // 6. Sync Invoices
+    const invoicesRes = await client.query("SELECT * FROM invoices");
+    if (invoicesRes.rows.length > 0) {
+      mockInvoices = invoicesRes.rows.map(row => ({
+        id: row.id,
+        amount: Number(row.amount),
+        date: row.date,
+        status: row.status,
+        visitsUsed: Number(row.visits_used),
+        creditsPurchased: Number(row.credits_purchased)
+      }));
+      console.log(`[GrowTraffic AI Supabase Sync] Seeding Invoices from Supabase: found ${mockInvoices.length} entries.`);
+    } else {
+      for (const inv of mockInvoices) {
+        await saveInvoiceToPostgres(inv);
+      }
+    }
+
+    client.release();
+    console.log("[GrowTraffic AI Supabase Sync] Database synchronized with backend runtime cache successfully!");
+  } catch (err: any) {
+    console.error("[GrowTraffic AI Supabase Sync] Read Error during DB synchronization startup phase:", err.message);
+  }
+}
+
 async function syncFromFirestore() {
   if (!isFirestoreActive || !db) {
     console.log("[GrowTraffic AI Database Sync] Using in-memory fallback. Firestore is not active.");
@@ -1146,8 +1658,15 @@ async function syncFromFirestore() {
 // ------------------------ STATIC VITE HANDLER ------------------------
 
 async function initServer() {
-  // Sync in initial database states on application boot before routing begins
-  await syncFromFirestore();
+  // 1. Bootstrap PostgreSQL / Supabase connection and tables first
+  await initPgDatabase();
+
+  // 2. Sync cache from either Postgres or Firestore
+  if (isPgActive) {
+    await syncFromPostgres();
+  } else {
+    await syncFromFirestore();
+  }
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

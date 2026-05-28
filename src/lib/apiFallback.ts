@@ -1,4 +1,93 @@
 import { Campaign, ActiveSimulation, FraudAlert, Project, TeamMember, Invoice } from "../types";
+import { createClient } from "@supabase/supabase-js";
+
+const SUPABASE_URL = "https://nsexouppruighjqdsure.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zZXhvdXBwcnVpZ2hqcWRzdXJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3OTYxODYsImV4cCI6MjA5NTM3MjE4Nn0.CWtHih3zX6xFjpKhmzRhsEtNfQ6VhjLMzZoDIhUzAfQ";
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+export async function syncClientWithSupabase() {
+  if (typeof window === "undefined") return;
+  try {
+    const { data, error } = await supabase
+      .from("campaigns")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (!error && data) {
+      const parsedCampaigns: Campaign[] = data.map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        targetUrl: row.target_url || row.targeturl,
+        totalVolume: Number(row.total_volume || row.totalvolume || 0),
+        dailyVolume: Number(row.daily_volume || row.dailyvolume || 0),
+        durationSeconds: Number(row.duration_seconds || row.durationseconds || 0),
+        bounceRateTarget: Number(row.bounce_rate_target || row.bounceratetarget || 0),
+        intervals: row.intervals as any,
+        geoTarget: row.geo_target || row.geotarget,
+        deviceSplit: typeof row.device_split === 'string' ? JSON.parse(row.device_split) : (row.device_split || row.devicesplit || { desktop: 50, mobile: 50, tablet: 0 }),
+        behaviorSim: typeof row.behavior_sim === 'string' ? JSON.parse(row.behavior_sim) : (row.behavior_sim || row.behaviorsim || { scroll: true, clicks: true, formInput: false }),
+        status: row.status as any,
+        createdAt: row.created_at || row.createdat,
+        hitsGenerated: Number(row.hits_generated || row.hitsgenerated || 0),
+        gaMeasurementId: row.ga_measurement_id || row.gameasurementid || "",
+        gaMeasurementSecret: row.ga_measurement_secret || row.gameasurementsecret || "",
+        worldwideGeoEnabled: row.worldwide_geo_enabled !== undefined ? row.worldwide_geo_enabled : (row.worldwidegeoenabled || false),
+        geoContinent: row.geo_continent || row.geocontinent || "",
+        randomizeFrequency: row.randomize_frequency || (row.randomizefrequency as any) || "session",
+        excludedCountries: Array.isArray(row.excluded_countries) ? row.excluded_countries : 
+                           (Array.isArray(row.excludedcountries) ? row.excludedcountries : [])
+      }));
+      
+      if (parsedCampaigns.length > 0) {
+        saveLocal("gt_campaigns", parsedCampaigns);
+        console.log("[GrowTraffic AI Client Supabase Sync] Successfully synchronized campaigns with Supabase DB.");
+      }
+    }
+  } catch (err) {
+    console.warn("[GrowTraffic AI Client Supabase Sync] Failed to sync with Supabase frontend client:", err);
+  }
+}
+
+async function saveCampaignToSupabaseClient(camp: Campaign) {
+  try {
+    const payload = {
+      id: camp.id,
+      name: camp.name,
+      target_url: camp.targetUrl,
+      total_volume: camp.totalVolume,
+      daily_volume: camp.dailyVolume,
+      duration_seconds: camp.durationSeconds,
+      bounce_rate_target: camp.bounceRateTarget,
+      intervals: camp.intervals,
+      geo_target: camp.geoTarget,
+      device_split: camp.deviceSplit,
+      behavior_sim: camp.behaviorSim,
+      status: camp.status,
+      created_at: camp.createdAt,
+      hits_generated: camp.hitsGenerated || 0,
+      ga_measurement_id: camp.gaMeasurementId || null,
+      ga_measurement_secret: camp.gaMeasurementSecret || null,
+      worldwide_geo_enabled: camp.worldwideGeoEnabled || false,
+      geo_continent: camp.geoContinent || null,
+      randomize_frequency: camp.randomizeFrequency || null,
+      excluded_countries: camp.excludedCountries || []
+    };
+    await supabase.from("campaigns").upsert(payload);
+    console.log("[GrowTraffic AI Client Supabase Sync] Campaign upserted successfully in background.");
+  } catch (e) {
+    console.warn("[GrowTraffic AI Client Supabase Sync] Upsert failed in background:", e);
+  }
+}
+
+async function deleteCampaignFromSupabaseClient(id: string) {
+  try {
+    await supabase.from("campaigns").delete().eq("id", id);
+    console.log("[GrowTraffic AI Client Supabase Sync] Campaign deleted successfully from Supabase.");
+  } catch (e) {
+    console.warn("[GrowTraffic AI Client Supabase Sync] Delete failed in background:", e);
+  }
+}
 
 // Setup global tracking variables
 declare global {
@@ -264,6 +353,9 @@ export function hookWindowFetch() {
   if (typeof window === "undefined" || (window as any).__fetchHooked) return;
   (window as any).__fetchHooked = true;
 
+  // Background trigger client side Supabase data load
+  syncClientWithSupabase();
+
   const originalFetch = window.fetch ? window.fetch.bind(window) : null;
 
   const customFetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -480,6 +572,7 @@ function handleLocalAPI(path: string, method: string, init?: RequestInit): Promi
       saveLocal("gt_profile", profile);
       saveLocal("gt_campaigns", campaigns);
       saveLocal("gt_simulations", simulations);
+      saveCampaignToSupabaseClient(newCamp);
 
       status = 201;
       body = { success: true, campaign: newCamp, simulation: newSim, remainingCredits: profile.credits };
@@ -501,6 +594,7 @@ function handleLocalAPI(path: string, method: string, init?: RequestInit): Promi
       }
       saveLocal("gt_campaigns", campaigns);
       saveLocal("gt_simulations", simulations);
+      saveCampaignToSupabaseClient(camp);
       body = { success: true, campaign: camp };
     }
   }
@@ -513,6 +607,7 @@ function handleLocalAPI(path: string, method: string, init?: RequestInit): Promi
     
     saveLocal("gt_campaigns", updatedCamp);
     saveLocal("gt_simulations", updatedSim);
+    deleteCampaignFromSupabaseClient(campId);
     body = { success: true, id: campId };
   }
   else if (path === "/api/statistics" && method === "GET") {
