@@ -1,8 +1,8 @@
 import { Campaign, ActiveSimulation, FraudAlert, Project, TeamMember, Invoice } from "../types";
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = "https://nsexouppruighjqdsure.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zZXhvdXBwcnVpZ2hqcWRzdXJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3OTYxODYsImV4cCI6MjA5NTM3MjE4Nn0.CWtHih3zX6xFjpKhmzRhsEtNfQ6VhjLMzZoDIhUzAfQ";
+const SUPABASE_URL = ((import.meta as any).env?.VITE_SUPABASE_URL as string) || "https://nsexouppruighjqdsure.supabase.co";
+const SUPABASE_ANON_KEY = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string) || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zZXhvdXBwcnVpZ2hqcWRzdXJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3OTYxODYsImV4cCI6MjA5NTM3MjE4Nn0.CWtHih3zX6xFjpKhmzRhsEtNfQ6VhjLMzZoDIhUzAfQ";
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
