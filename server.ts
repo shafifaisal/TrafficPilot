@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp, getApps } from "firebase/app";
 import { getFirestore, doc, setDoc, deleteDoc, getDocs, collection } from "firebase/firestore";
@@ -1684,6 +1683,7 @@ async function initServer() {
 
   if (!process.env.VERCEL) {
     if (process.env.NODE_ENV !== "production") {
+      const { createServer: createViteServer } = await import("vite");
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: "spa",
